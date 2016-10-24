@@ -1,0 +1,3 @@
+{"method": "twinkle", "params": {"speed": 50}}
+
+{"method": "fades", "params": {"speed": 50}}

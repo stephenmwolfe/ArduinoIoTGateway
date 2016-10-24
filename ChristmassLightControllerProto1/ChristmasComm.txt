@@ -1,0 +1,7 @@
+{"group": 0, "program": 0, "speed": 50}
+
+{"group": 0, "speed": 10}
+
+{"program": 0, "speed": 50, "group": 0}
+
+{"method": "fades", "params": {"speed": 50}}

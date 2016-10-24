@@ -7,25 +7,37 @@ AF_DCMotor group1b(2);
 AF_DCMotor group2a(3);
 AF_DCMotor group2b(4);
 
+//Directions
+const int IN = 1;
+const int OUT = 0;
+
+//Programs
+const int RAND_TWINKLE = 0;
+const int FADES = 1;
+
+//Program Speed Factors
+const int TWINKLE_SF = 5; //Lower numbers make twinkles faster
+const int FADES_SF = 3;  //Lower numbers make fades faster
+
+//Limits
+const int  MAX_GROUP = 1;
+const int  MAX_PROGRAM = 1;
+const int  MAX_SPEED = 100;
+const int  MAX_LED_VALUE = 255;
+
 /***************************************/
 
 struct LED {
 
-  public: int dir;
   private: int value;
   private: AF_DCMotor * led;
 
-  public: LED(int inDir, int inValue, AF_DCMotor * inLed){
-    dir = inDir;
-    value = inValue;
+  public: LED(AF_DCMotor * inLed){
     led = inLed;
   }
 
-  public: LED(){
-  }
-
   public: setValue(int inValue) {
-    if(inValue >= 0 && inValue <= 255) {
+    if(inValue >= 0 && inValue <= MAX_LED_VALUE) {
       value = inValue;
       led->setSpeed(value);
     }
@@ -37,8 +49,172 @@ struct LED {
       led->run(RELEASE);
     }
   }
+
+  public: fade(int increment) {
+
+    int targetValue = value + increment;
+
+    if(targetValue > MAX_LED_VALUE) {
+      targetValue = MAX_LED_VALUE;
+    }
+    else if (targetValue < 0) {
+      targetValue = 0;
+    }
+
+    setValue(targetValue);
+  }
+
+  public: int getValue() {
+    return value;
+  }
+  
 };
 
+struct LEDGroup {
+
+  private: LED * ledA;
+  private: LED * ledB;
+  
+  private: LED * currLed;
+  private: LED * groupLeds[2];
+
+  private: int seqSpeed;
+  private: int program;
+  private: int dir;
+  private: float counter;
+  private: int seqStep;
+
+  public: LEDGroup(LED * inLedA, LED * inLedB, int inSpeed, int inProgram){
+    ledA = inLedA;
+    ledB = inLedB;
+
+    groupLeds[0] = ledA;
+    groupLeds[1] = ledB;
+
+    setSpeed(inSpeed);
+    setProgram(inProgram);
+  }
+
+  public: setSpeed(int inSpeed) {
+    if(inSpeed >= 0 and inSpeed <= MAX_SPEED) {
+      seqSpeed = inSpeed;
+    }
+  }
+
+  public: int getSpeed() {
+    return seqSpeed;
+  }
+
+  public: setProgram(int inProgram) {
+    if(inProgram >= 0 && inProgram <=MAX_PROGRAM) {
+      if(inProgram != program) {
+        program = inProgram;
+        counter = 0;
+        seqStep = 0;
+        currLed = ledA;
+      }
+       
+    }
+    
+  }
+
+  public: int getProgram() {
+    return program;
+  }
+
+  public: setDirection(int inDir) {
+    if(inDir >= 0 && inDir <=1) {
+      dir = inDir; 
+    }
+  }
+
+  public: int getDirection() {
+    return dir;
+  }
+
+  public: groupStep() {
+
+    switch(program) {
+      case RAND_TWINKLE: 
+        randTwinkleStep();
+        break;
+      case FADES: 
+        fadesStep();
+        break;
+    }
+    
+  }
+
+  private: randTwinkleStep() {
+
+    counter = ((float)seqSpeed/(float)TWINKLE_SF) + counter;
+
+    if(counter >= MAX_SPEED) {
+      switch(seqStep) {
+        case 0: //Step One - pick random LED, turn it on
+          currLed = groupLeds[random(2)];
+          currLed->setValue(MAX_LED_VALUE);
+          seqStep++;
+          break;
+        case 1: //Step two - turn LED off
+          currLed->setValue(0);
+          seqStep = 0;
+          break;
+      }
+      counter = 0;
+    }
+  }
+
+  private: fadesStep() {
+
+    float fadeIncrement = seqSpeed/FADES_SF;
+
+    if(fadeIncrement < 1) {
+      counter++;
+      if(counter > FADES_SF) {
+        counter = 0;
+        fadeIncrement = 1;
+      }
+    }
+
+    switch(seqStep) {
+      case 0: //Step One - fade in first LED
+        ledA->fade(fadeIncrement);
+
+        if(currLed->getValue() == MAX_LED_VALUE) {
+          seqStep++;
+        }
+        
+        break;
+      case 1: //Step Two - fade in second LED
+        ledB->fade(fadeIncrement);
+
+        if(ledB->getValue() == MAX_LED_VALUE) {
+          seqStep++;
+        }
+        
+        break;
+      case 2: //Step Three - fade out first LED
+        ledA->fade(fadeIncrement * -1);
+
+        if(currLed->getValue() == 0) {
+          seqStep++;
+        }
+        
+        break;
+      case 3: //Step Four - fade out second LED
+        ledB->fade(fadeIncrement * -1);
+
+        if(ledB->getValue() == 0) {
+          seqStep = 0;
+        }
+        
+        break;
+    }
+
+  }
+  
+};
 
 LED *zero;
 LED *one;
@@ -47,47 +223,42 @@ LED *three;
 
 LED *allLeds[4];
 
-//fade Directions
-const int in = 1;
-const int out = 0;
+LEDGroup *group0;
+LEDGroup *group1;
+
+LEDGroup *allGroups[2];
 
 String comdata = "twinkle";
-String command = "twinkle";
+int    comProgram = 0;
+int    comSpeed = 10;
+int    comGroup = 0;
+
+
 boolean noCommand = false;
-StaticJsonBuffer<200> jsonBuffer;
 int lastLength = 0;
 int buffSize = 0;
 int fadeSpeed = 5;
-int twinkleSpeed = 100;
-int twinkleDur = 100;
 
 /***************************************/
 void setup()
 {
   
-  zero = new LED(1,0,&group1a);
-  one = new LED(1,0,&group1b);
-  two = new LED(1,0,&group2a);
-  three = new LED(1,0,&group2b);
+  zero = new LED(&group1a);
+  one = new LED(&group1b);
+  two = new LED(&group2a);
+  three = new LED(&group2b);
 
   allLeds[0] = zero;
   allLeds[1] = one;
   allLeds[2] = two;
   allLeds[3] = three;
 
-  /*
-  group1a.setSpeed(255);
-  group1a.run(FORWARD);
-  
-  group1b.setSpeed(255);
-  group1b.run(FORWARD);
-  
-  group2a.setSpeed(255);
-  group2a.run(FORWARD);
-  
-  group2b.setSpeed(255);
-  group2b.run(FORWARD);
-  */
+  group0 = new LEDGroup(zero,one,5,RAND_TWINKLE);
+  group1 = new LEDGroup(two,three,5,RAND_TWINKLE);
+
+  allGroups[0] = group0;
+  allGroups[1] = group1;
+
 
   zero->setValue(255);
   one->setValue(255);
@@ -108,7 +279,7 @@ void setup()
 /****************************************/
 void loop()
 {
-  delay(100);
+  delay(10);
   //read string from serial monitor
   if(Serial.available()>0)  // if we get a valid byte, read analog ins:
   { 
@@ -126,6 +297,8 @@ void loop()
     
     char jsonTmp[200];
     comdata.toCharArray(jsonTmp, 200);
+
+    StaticJsonBuffer<200> jsonBuffer;
     Serial.print("jsonTmp: ");
     Serial.println(jsonTmp);
     JsonObject& root = jsonBuffer.parseObject(jsonTmp);
@@ -134,34 +307,59 @@ void loop()
       Serial.println("parseObject() failed");
       return;
     }
+
+    if(root["group"].is<int>()) {
+      comGroup = root["group"];
+      Serial.print("Group: ");
+      Serial.println(comGroup);
+
+      if(comGroup >=0 and comGroup <=MAX_GROUP) {
+        
+        //Program Update
+        if(root["program"].is<int>()) {
+          comProgram = root["program"];
+          Serial.print("Program: ");
+          Serial.println(comProgram);
+
+          if(comProgram >=0 and comProgram <=MAX_PROGRAM) {
+            allGroups[comGroup]->setProgram(comProgram);
+          }
+          else {
+            Serial.println("Invalid Program");
+          }
+        }
+
+        //Speed Update
+        if(root["speed"].is<int>()) {
+          comSpeed = root["speed"];
+          Serial.print("Speed: ");
+          Serial.println(comSpeed);
+
+          if(comSpeed >=0 and comSpeed <=MAX_SPEED) {
+            allGroups[comGroup]->setSpeed(comSpeed);
+          }
+          else {
+            Serial.println("Invalid Speed");
+          }
+        }
+        
+      }
+      else {
+          Serial.println("Invalid Group");
+      }
+
+      
+    }
     
     const char* tmp = root["method"];
-    command = tmp;
     Serial.print("Command: ");
     Serial.println(tmp);
-      if(command == "twinkle") {
-        if(root["params"]["speed"] >=0 && root["params"]["speed"] <=255) {
-          twinkleSpeed = root["params"]["speed"];
-          Serial.print("Twinkle Speed: ");
-          Serial.println(twinkleSpeed);
-        }
-      }
-      else if(command == "fades") {
-        if(root["params"]["speed"] >=0 && root["params"]["speed"] <=255) {
-          fadeSpeed = root["params"]["speed"];
-          Serial.print("Fade Speed: ");
-          Serial.println(fadeSpeed);
-        }
-      }
+
 
   }
   
-  if(command == "twinkle") {
-    randTwinkle(twinkleSpeed);
-  }
-  else if(command == "fades") {
-    fades(fadeSpeed);
-  }
+  group0->groupStep(); //Move LED Group 0 along
+  group1->groupStep(); //Move LED Group 1 along
 
   Serial.flush();
   
@@ -177,39 +375,6 @@ void randTwinkle(int Speed) {
   allLeds[rn]->setValue(0);
   delay(Speed);
       
-  /*
-  switch(rn) {
-    case 0:
-      //twinkle(group1a,Speed);
-      allLeds[0]->setValue(255);
-      delay(Speed);
-      allLeds[0]->setValue(0);
-      delay(Speed);
-      break;
-    case 1:
-      //twinkle(group1b,Speed);
-      one->setValue(255);
-      delay(Speed);
-      one->setValue(0);
-      delay(Speed);
-      break;
-    case 2:
-      //twinkle(group2a,Speed);
-      two->setValue(255);
-      delay(Speed);
-      two->setValue(0);
-      delay(Speed);
-      break;
-    case 3:
-      //twinkle(group2b,Speed);
-      three->setValue(255);
-      delay(Speed);
-      three->setValue(0);
-      delay(Speed);
-      break;
-  }
-  */
-
 }
 
 void fades(int fadeSpeed) {

@@ -1,7 +1,10 @@
 #include <ArduinoJson.h>
 #include <AFMotor.h>
+#include <EEPROM.h>
 
 //Constants *************************************** Constants
+
+const int EEPROM_START = 50;
 
 //Directions
 const int IN = 1;
@@ -14,6 +17,9 @@ const int FADES = 2;
 const int ALT_TWINKLE = 3;
 const int CROSS_FADE = 4;
 const int CONSTANT = 5;
+const int GROUP_FADE = 6;
+const int GROUP_TWINKLE = 7;
+const int RANDOM = 8;
 
 //Program Speed Factors
 const int TWINKLE_SF = 5; //Lower numbers make twinkles faster
@@ -21,7 +27,7 @@ const int FADES_SF = 3;  //Lower numbers make fades faster
 
 //Limits
 const int  MAX_GROUP = 2;
-const int  MAX_PROGRAM = 5;
+const int  MAX_PROGRAM = 8;
 const int  MAX_SPEED = 100;
 const int  MAX_LED_VALUE = 255;
 const int  MIN_LED_VALUE = 0;
@@ -252,6 +258,15 @@ struct LEDGroup {
       case CONSTANT: 
         constantStep();
         break;
+      case GROUP_FADE:
+        groupFadeStep();
+        break;
+      case GROUP_TWINKLE:
+        groupTwinkleStep();
+        break;
+      case RANDOM:
+        randomize();
+        break;
     }
     
   }
@@ -269,6 +284,34 @@ struct LEDGroup {
           break;
         case 1: //Step two - turn LED off
           groupLeds[currLed]->setValue(MIN_LED_VALUE);
+          seqStep = 0;
+          break;
+      }
+      counter = 0;
+    }
+  }
+
+  private: groupTwinkleStep() {
+
+    counter = ((float)seqSpeed/(float)TWINKLE_SF) + counter;
+
+    if(counter >= MAX_SPEED) {
+      switch(seqStep) {
+        case 0: //Step One - turn all LEDs on
+
+          for(int i = 0; i <= maxLed; i++) {
+            groupLeds[i]->setValue(MAX_LED_VALUE);
+          }
+          
+          seqStep++;
+          break;
+        case 1: //Step two - turn all LEDs off
+          groupLeds[currLed]->setValue(MIN_LED_VALUE);
+
+          for(int i = 0; i <= maxLed; i++) {
+            groupLeds[i]->setValue(MIN_LED_VALUE);
+          }
+          
           seqStep = 0;
           break;
       }
@@ -378,6 +421,64 @@ struct LEDGroup {
       }
     }
   }
+
+  private: groupFadeStep() {
+
+    float fadeIncrement = seqSpeed/FADES_SF;
+
+    if(fadeIncrement < 1) {
+      counter++;
+      if(counter > FADES_SF) {
+        counter = 0;
+        fadeIncrement = 1;
+      }
+    }
+
+    switch(seqStep) {
+      case 0: //Step One - fade in LEDs
+      
+        for(int i = 0; i <= maxLed; i++) {
+          groupLeds[i]->fade(fadeIncrement);
+        }
+        
+        if(groupLeds[0]->getValue() == MAX_LED_VALUE) {
+          seqStep++; //All LEDs on, go to next step   
+        }
+        
+        break;
+
+      case 1: //Step Three - fade out first LED
+        
+        for(int i = 0; i <= maxLed; i++) {
+          groupLeds[i]->fade(fadeIncrement *-1);
+        }
+        
+        if(groupLeds[0]->getValue() <= MIN_LED_VALUE) {
+            seqStep = 0; //All LEDs off, start again    
+        }
+        
+        break;
+    }
+
+    message = "FadeIncrement: ";
+    message.concat(fadeIncrement); 
+    logMessage(9,message);
+
+    message = "LED Value: ";
+    message.concat(groupLeds[currLed]->getValue()); 
+    logMessage(9,message);
+  }
+
+  private: randomize() {
+
+    counter = ((float)seqSpeed/(float)TWINKLE_SF) + counter;
+
+    if(counter >= MAX_SPEED) {
+      //set random LED to random value
+      groupLeds[random(maxLed+1)]->setValue(random(MIN_LED_VALUE,MAX_LED_VALUE));
+      counter = 0;
+    }
+  }
   
 };
 
@@ -400,6 +501,60 @@ AF_DCMotor group1a(1);
 AF_DCMotor group1b(2);
 AF_DCMotor group2a(3);
 AF_DCMotor group2b(4);
+
+//Helper Functions *************************************** Helper Functions
+
+void save() {
+
+  int i = EEPROM_START;
+  EEPROM.update(i++,logLevel);
+  EEPROM.update(i++,group0->getProgram());
+  EEPROM.update(i++,group0->getSpeed());
+  EEPROM.update(i++,group1->getProgram());
+  EEPROM.update(i++,group1->getSpeed());
+  EEPROM.update(i++,group2->getProgram());
+  EEPROM.update(i++,group2->getSpeed());
+  
+}
+
+void load() {
+
+  int i = EEPROM_START;
+
+  int j;
+
+  j = EEPROM.read(i++);
+  logLevel = j; //get saved log level before logging
+
+  logMessage(3,"Loading Values:");
+  logMessage(3,String(j));
+
+  j = EEPROM.read(i++);
+  logMessage(3,String(j));
+  group0->setProgram(j);
+  
+  j = EEPROM.read(i++);
+  logMessage(3,String(j));
+  group0->setSpeed(j);
+
+  j = EEPROM.read(i++);
+  logMessage(3,String(j));
+  group1->setProgram(j);
+  
+  
+  j = EEPROM.read(i++);
+  logMessage(3,String(j));
+  group1->setSpeed(j);
+
+  j = EEPROM.read(i++);
+  logMessage(3,String(j));
+  group2->setProgram(j);
+  
+  j = EEPROM.read(i++);
+  logMessage(3,String(j));
+  group2->setSpeed(j);
+
+}
 
 //Arduino Functions *************************************** Arduino Functions
 
@@ -451,8 +606,13 @@ void setup()
   one->setValue(MIN_LED_VALUE);
   two->setValue(MIN_LED_VALUE);
   three->setValue(MIN_LED_VALUE);
-  
+
+  delay(1000);
+
   Serial.begin(9600);  // start serial port at 9600 bps:
+
+  load();
+  
   Serial.println("Please input command:");  //print message on serial monitor
 }
 /****************************************/
@@ -583,6 +743,14 @@ void loop()
       else {
         logMessage(1,"Invalid LED");
       }
+    }
+    else if (root["save"] == 1) {
+      logMessage(3,"Saving");
+      save(); 
+    }
+    else if (root["load"] == 1) {
+      logMessage(3,"Loading");
+      load(); 
     }
     
   }

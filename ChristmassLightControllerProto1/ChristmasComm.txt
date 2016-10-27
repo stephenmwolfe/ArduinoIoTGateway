@@ -7,6 +7,12 @@
 
 {"led": 0, "value": 255} 
 
-{"logLvl": 10}
+{"logLvl": 5}
 
-{"method": "fades", "params": {"speed": 50}}
+{"save": 1}
+
+{"load": 1}
+
+Save:
+{"program": 2, "speed": 10, "group": 0}
+{"program": 1, "speed": 30, "group": 1}

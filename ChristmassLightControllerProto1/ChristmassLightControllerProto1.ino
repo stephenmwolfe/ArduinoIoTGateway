@@ -1,11 +1,7 @@
 #include <ArduinoJson.h>
-
 #include <AFMotor.h>
 
-AF_DCMotor group1a(1);
-AF_DCMotor group1b(2);
-AF_DCMotor group2a(3);
-AF_DCMotor group2b(4);
+//Constants *************************************** Constants
 
 //Directions
 const int IN = 1;
@@ -24,23 +20,39 @@ const int TWINKLE_SF = 5; //Lower numbers make twinkles faster
 const int FADES_SF = 3;  //Lower numbers make fades faster
 
 //Limits
-const int  MAX_GROUP = 1;
+const int  MAX_GROUP = 2;
 const int  MAX_PROGRAM = 5;
 const int  MAX_SPEED = 100;
 const int  MAX_LED_VALUE = 255;
 const int  MIN_LED_VALUE = 0;
-const int  MAX_LED_PER_GROUP = 1;
+const int  MAX_LEDS_PER_GROUP = 4;
+const int  MAX_LED = 3;
+
+//Global Primatives *************************************** Global Primatives 
+
+String comdata = "twinkle";
+int    comProgram = 0;
+int    comSpeed = 10;
+int    comGroup = 0;
+int    comLed = 0;
+
+boolean noCommand = false;
+int lastLength = 0;
+int buffSize = 0;
+int fadeSpeed = 5;
 
 int logLevel = 0;
 String message;
 
-/***************************************/
+//Global Functions *************************************** Global Functions
 
 void logMessage(int level, String message) {
     if(level <= logLevel) {
       Serial.println(message);
     }
 }
+
+//Objects  *************************************** Objects
 
 struct LED {
 
@@ -100,32 +112,33 @@ struct LED {
 };
 
 struct LEDGroup {
-
-  private: LED * ledA;
-  private: LED * ledB;
   
   private: int currLed;
   private: int prevLed;
   private: int nextLed;
   
-  private: LED * groupLeds[2];
+  private: LED * groupLeds[MAX_LEDS_PER_GROUP];
 
   private: int seqSpeed;
   private: int program;
   private: int dir;
   private: float counter;
   private: int seqStep;
+  private: int maxLed;
+  private: int id;
 
-  public: LEDGroup(LED * inLedA, LED * inLedB, int inSpeed, int inProgram){
-    ledA = inLedA;
-    ledB = inLedB;
-    setCurrLed(0);
-    
-    groupLeds[0] = ledA;
-    groupLeds[1] = ledB;
+  public: LEDGroup(int inId){
+    id = inId;
+    setSpeed(0);
+    setProgram(0);
+    maxLed = -1;
+  }
 
-    setSpeed(inSpeed);
-    setProgram(inProgram);
+  public: addLed (LED * inLed) {
+    if(maxLed < (MAX_LEDS_PER_GROUP - 1)) {
+      maxLed++;
+      groupLeds[maxLed] = inLed;
+    }
   }
 
   public: setSpeed(int inSpeed) {
@@ -136,6 +149,10 @@ struct LEDGroup {
 
   public: int getSpeed() {
     return seqSpeed;
+  }
+
+  public: int getId() {
+    return id;
   }
 
   public: setProgram(int inProgram) {
@@ -150,7 +167,7 @@ struct LEDGroup {
   }
 
   public: reset() {
-    for (int i=0; i <= MAX_LED_PER_GROUP; i++) {
+    for (int i=0; i <= maxLed; i++) {
       groupLeds[i]->setValue(0);
     }
     counter = 0;
@@ -178,11 +195,11 @@ struct LEDGroup {
 
   private: setCurrLed(int in) {
     currLed = in;
-    if(currLed > MAX_LED_PER_GROUP) {
+    if(currLed > maxLed) {
       currLed = 0;
     }
     else if(currLed < 0) {
-      currLed = MAX_LED_PER_GROUP;
+      currLed = maxLed;
     }
 
     message = "Curr LED: ";
@@ -191,11 +208,11 @@ struct LEDGroup {
     
     nextLed = currLed + 1;
     
-    if(nextLed > MAX_LED_PER_GROUP) {
+    if(nextLed > maxLed) {
       nextLed = 0;
     }
     else if(nextLed < 0) {
-      nextLed = MAX_LED_PER_GROUP;
+      nextLed = maxLed;
     }
     
     message = "Next LED: ";
@@ -204,12 +221,12 @@ struct LEDGroup {
     
     prevLed = currLed - 1;
     
-    if(prevLed > MAX_LED_PER_GROUP) {
+    if(prevLed > maxLed) {
       prevLed = 0;
     }
     
     else if(prevLed < 0) {
-      prevLed = MAX_LED_PER_GROUP;
+      prevLed = maxLed;
     }
 
     message = "Prev LED: ";
@@ -277,7 +294,7 @@ struct LEDGroup {
 
         if(groupLeds[currLed]->getValue() == MAX_LED_VALUE) {
           
-          if(currLed == MAX_LED_PER_GROUP) {
+          if(currLed == maxLed) {
             seqStep++; //All LEDs on, go to next step
           }
           incrementCurrLed(1);      
@@ -290,7 +307,7 @@ struct LEDGroup {
         
         if(groupLeds[currLed]->getValue() <= MIN_LED_VALUE) {
           
-          if(currLed == MAX_LED_PER_GROUP) {
+          if(currLed == maxLed) {
             seqStep = 0; //All LEDs off, start again
           }
           incrementCurrLed(1);      
@@ -355,7 +372,7 @@ struct LEDGroup {
     int value = seqSpeed * ((float)seqSpeed/(float)(MAX_LED_VALUE - MIN_LED_VALUE));
     value = value + MIN_LED_VALUE;
 
-    for(int i = 0; i <= MAX_LED_PER_GROUP; i++) {
+    for(int i = 0; i <= maxLed; i++) {
       if(groupLeds[i]->getValue() != value) {
         groupLeds[i]->setValue(value);
       }
@@ -363,6 +380,8 @@ struct LEDGroup {
   }
   
 };
+
+//Global Objects *************************************** Global Objects
 
 LED *zero;
 LED *one;
@@ -373,21 +392,17 @@ LED *allLeds[4];
 
 LEDGroup *group0;
 LEDGroup *group1;
+LEDGroup *group2;
 
-LEDGroup *allGroups[2];
+LEDGroup *allGroups[3];
 
-String comdata = "twinkle";
-int    comProgram = 0;
-int    comSpeed = 10;
-int    comGroup = 0;
+AF_DCMotor group1a(1);
+AF_DCMotor group1b(2);
+AF_DCMotor group2a(3);
+AF_DCMotor group2b(4);
 
+//Arduino Functions *************************************** Arduino Functions
 
-boolean noCommand = false;
-int lastLength = 0;
-int buffSize = 0;
-int fadeSpeed = 5;
-
-/***************************************/
 void setup()
 {
   
@@ -401,11 +416,27 @@ void setup()
   allLeds[2] = two;
   allLeds[3] = three;
 
-  group0 = new LEDGroup(zero,one,5,RAND_TWINKLE);
-  group1 = new LEDGroup(two,three,5,RAND_TWINKLE);
+  group0 = new LEDGroup(0);
+  group0->addLed(zero);
+  group0->addLed(one);
+  group0->setProgram(1);
+  group0->setSpeed(10);
+  
+  group1 = new LEDGroup(1);
+  group1->addLed(two); 
+  group1->addLed(three);
+  group1->setProgram(1);
+  group1->setSpeed(10);
+
+  group2 = new LEDGroup(2);
+  group2->addLed(zero);
+  group2->addLed(one);
+  group2->addLed(two); 
+  group2->addLed(three); 
 
   allGroups[0] = group0;
   allGroups[1] = group1;
+  allGroups[2] = group2;
 
 
   zero->setValue(MAX_LED_VALUE);
@@ -454,18 +485,16 @@ void loop()
       return;
     }
 
-    //check for log level commands
+   
 
-    if(root["logLvl"].is<int>()) {
+    if(root["logLvl"].is<int>()) {  //check for log level commands
       logLevel = root["logLvl"];
       
       message = "Log Level Set To: ";
       message.concat(logLevel); 
       logMessage(1,message);
     }
-
-    //check for group commands
-    if(root["group"].is<int>()) {
+    else if(root["group"].is<int>()) { //check for group commands
       comGroup = root["group"];
 
       message = "Group: ";
@@ -484,6 +513,16 @@ void loop()
 
           if(comProgram >=0 and comProgram <=MAX_PROGRAM) {
             allGroups[comGroup]->setProgram(comProgram);
+            //If Group 2 is enabled disable Groups 0 and 1
+            if(comGroup == 2 and  comProgram > DISABLED) {
+              group0->setProgram(DISABLED);
+              group1->setProgram(DISABLED);
+            }
+            //If Group 0 or 1 is enabled disable Groups 2
+            if(comGroup < 2 and  comProgram > DISABLED) {
+              group2->setProgram(DISABLED);
+            }
+            
           }
           else {
             logMessage(1,"Invalid Program");
@@ -511,19 +550,53 @@ void loop()
           logMessage(1,"Invalid Group");
       }
 
-      
     }
+    else if (root["led"].is<int>()) {
+      
+      comLed = root["led"];
+      message = "LED: ";
+      message.concat(comLed); 
+      logMessage(3,message);
 
+      if(comLed >=0 and comLed <=MAX_LED) {
+        
+        //Value Update
+        if(root["value"].is<int>()) {
+          comSpeed = root["value"];
+
+          message = "Value: ";
+          message.concat(comSpeed); 
+          logMessage(3,message);
+
+          //Disable groups the LED is in
+          group2->setProgram(DISABLED);
+          if(comLed < 2) {
+            group0->setProgram(DISABLED);
+          }
+          else {
+            group1->setProgram(DISABLED);
+          }
+  
+          allLeds[comLed]->setValue(comSpeed);
+        }
+      }
+      else {
+        logMessage(1,"Invalid LED");
+      }
+    }
+    
   }
 
   logMessage(9,"Cycle Start");
-  
-  group0->groupStep(); //Move LED Group 0 along
-  group1->groupStep(); //Move LED Group 1 along
+
+  for(int i = 0; i<=MAX_GROUP; i++) {
+    allGroups[i]->groupStep(); //Move LED Group i along
+  }
 
   Serial.flush();
   
 }
+
 /****************************************/
 
 

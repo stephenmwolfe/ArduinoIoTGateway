@@ -5,6 +5,8 @@
 {"program": 0, "speed": 50, "group": 0}
 {"program": 4, "speed": 50, "group": 0}
 
+{"led": 0, "value": 255} 
+
 {"logLvl": 10}
 
 {"method": "fades", "params": {"speed": 50}}

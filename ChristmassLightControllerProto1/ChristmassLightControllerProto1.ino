@@ -12,10 +12,12 @@ const int IN = 1;
 const int OUT = 0;
 
 //Programs
-const int RAND_TWINKLE = 0;
-const int FADES = 1;
-const int ALT_TWINKLE = 2;
-const int CROSS_FADE = 3;
+const int DISABLED = 0;
+const int RAND_TWINKLE = 1;
+const int FADES = 2;
+const int ALT_TWINKLE = 3;
+const int CROSS_FADE = 4;
+const int CONSTANT = 5;
 
 //Program Speed Factors
 const int TWINKLE_SF = 5; //Lower numbers make twinkles faster
@@ -23,34 +25,62 @@ const int FADES_SF = 3;  //Lower numbers make fades faster
 
 //Limits
 const int  MAX_GROUP = 1;
-const int  MAX_PROGRAM = 3;
+const int  MAX_PROGRAM = 5;
 const int  MAX_SPEED = 100;
 const int  MAX_LED_VALUE = 255;
+const int  MIN_LED_VALUE = 0;
 const int  MAX_LED_PER_GROUP = 1;
 
+int logLevel = 0;
+String message;
+
 /***************************************/
+
+void logMessage(int level, String message) {
+    if(level <= logLevel) {
+      Serial.println(message);
+    }
+}
 
 struct LED {
 
   private: int value;
+  private: int id;
   private: AF_DCMotor * led;
 
-  public: LED(AF_DCMotor * inLed){
+  public: LED(AF_DCMotor * inLed, int inId){
     led = inLed;
+    value = MIN_LED_VALUE;
+    id = inId;
   }
 
   public: setValue(int inValue) {
-    if(inValue >= 0 && inValue <= MAX_LED_VALUE) {
+
+    message = "LED ";
+    message.concat(id); 
+    message.concat(" inValue: ");
+    message.concat(inValue);
+    logMessage(9,message);
+    
+    if(inValue >= MIN_LED_VALUE && inValue <= MAX_LED_VALUE) {
       value = inValue;
       led->setSpeed(value);
     }
     
-    if (value > 0) {
+    if (value > MIN_LED_VALUE) {
       led->run(FORWARD);
     }
     else {
       led->run(RELEASE);
     }
+  }
+
+  public: int getValue() {
+    return value;
+  }
+
+  public: int getId() {
+    return id;
   }
 
   public: fade(int increment) {
@@ -60,15 +90,11 @@ struct LED {
     if(targetValue > MAX_LED_VALUE) {
       targetValue = MAX_LED_VALUE;
     }
-    else if (targetValue < 0) {
-      targetValue = 0;
+    else if (targetValue < MIN_LED_VALUE) {
+      targetValue = MIN_LED_VALUE;
     }
 
     setValue(targetValue);
-  }
-
-  public: int getValue() {
-    return value;
   }
   
 };
@@ -159,8 +185,9 @@ struct LEDGroup {
       currLed = MAX_LED_PER_GROUP;
     }
 
-    //Serial.print("Curr LED: ");
-    //Serial.println(currLed);
+    message = "Curr LED: ";
+    message.concat(currLed); 
+    logMessage(7,message);
     
     nextLed = currLed + 1;
     
@@ -171,8 +198,9 @@ struct LEDGroup {
       nextLed = MAX_LED_PER_GROUP;
     }
     
-    //Serial.print("Next LED: ");
-    //Serial.println(nextLed);
+    message = "Next LED: ";
+    message.concat(nextLed); 
+    logMessage(7,message);
     
     prevLed = currLed - 1;
     
@@ -184,8 +212,9 @@ struct LEDGroup {
       prevLed = MAX_LED_PER_GROUP;
     }
 
-    //Serial.print("Prev LED: ");
-    //Serial.println(prevLed);    
+    message = "Prev LED: ";
+    message.concat(prevLed); 
+    logMessage(7,message); 
   }
 
   public: groupStep() {
@@ -202,8 +231,10 @@ struct LEDGroup {
         break;
       case CROSS_FADE: 
         crossFadeStep();
-      break;
-        
+        break;
+      case CONSTANT: 
+        constantStep();
+        break;
     }
     
   }
@@ -220,7 +251,7 @@ struct LEDGroup {
           seqStep++;
           break;
         case 1: //Step two - turn LED off
-          groupLeds[currLed]->setValue(0);
+          groupLeds[currLed]->setValue(MIN_LED_VALUE);
           seqStep = 0;
           break;
       }
@@ -257,7 +288,7 @@ struct LEDGroup {
       case 1: //Step Three - fade out first LED
         groupLeds[currLed]->fade(fadeIncrement * -1);
         
-        if(groupLeds[currLed]->getValue() == 0) {
+        if(groupLeds[currLed]->getValue() <= MIN_LED_VALUE) {
           
           if(currLed == MAX_LED_PER_GROUP) {
             seqStep = 0; //All LEDs off, start again
@@ -267,6 +298,14 @@ struct LEDGroup {
         
         break;
     }
+
+    message = "FadeIncrement: ";
+    message.concat(fadeIncrement); 
+    logMessage(9,message);
+
+    message = "LED Value: ";
+    message.concat(groupLeds[currLed]->getValue()); 
+    logMessage(9,message);
   }
 
   private: altTwinkleStep() {
@@ -274,7 +313,7 @@ struct LEDGroup {
 
     if(counter >= MAX_SPEED) {
 
-      groupLeds[currLed]->setValue(0);
+      groupLeds[currLed]->setValue(MIN_LED_VALUE);
       incrementCurrLed(1);
       groupLeds[currLed]->setValue(MAX_LED_VALUE);
       
@@ -284,7 +323,7 @@ struct LEDGroup {
 
   private: crossFadeStep() {
 
-    float fadeIncrement = seqSpeed/FADES_SF;
+    float fadeIncrement = (float)seqSpeed/(float)FADES_SF;
 
     if(fadeIncrement < 1) {
       counter++;
@@ -297,8 +336,29 @@ struct LEDGroup {
     groupLeds[currLed]->fade(fadeIncrement);
     groupLeds[prevLed]->fade(fadeIncrement * -1);
 
+    message = "FadeIncrement: ";
+    message.concat(fadeIncrement); 
+    logMessage(9,message);
+
+    message = "LED Value: ";
+    message.concat(groupLeds[currLed]->getValue()); 
+    logMessage(9,message);
+
     if(groupLeds[currLed]->getValue() == MAX_LED_VALUE) {
       incrementCurrLed(1);      
+    }
+
+  }
+
+  private: constantStep() {
+
+    int value = seqSpeed * ((float)seqSpeed/(float)(MAX_LED_VALUE - MIN_LED_VALUE));
+    value = value + MIN_LED_VALUE;
+
+    for(int i = 0; i <= MAX_LED_PER_GROUP; i++) {
+      if(groupLeds[i]->getValue() != value) {
+        groupLeds[i]->setValue(value);
+      }
     }
   }
   
@@ -331,10 +391,10 @@ int fadeSpeed = 5;
 void setup()
 {
   
-  zero = new LED(&group1a);
-  one = new LED(&group1b);
-  two = new LED(&group2a);
-  three = new LED(&group2b);
+  zero = new LED(&group1a,0);
+  one = new LED(&group1b,1);
+  two = new LED(&group2a,2);
+  three = new LED(&group2b,3);
 
   allLeds[0] = zero;
   allLeds[1] = one;
@@ -348,18 +408,18 @@ void setup()
   allGroups[1] = group1;
 
 
-  zero->setValue(255);
-  one->setValue(255);
-  two->setValue(255);
-  three->setValue(255);
+  zero->setValue(MAX_LED_VALUE);
+  one->setValue(MAX_LED_VALUE);
+  two->setValue(MAX_LED_VALUE);
+  three->setValue(MAX_LED_VALUE);
 
   
   delay(1000);
 
-  zero->setValue(0);
-  one->setValue(0);
-  two->setValue(0);
-  three->setValue(0);
+  zero->setValue(MIN_LED_VALUE);
+  one->setValue(MIN_LED_VALUE);
+  two->setValue(MIN_LED_VALUE);
+  three->setValue(MIN_LED_VALUE);
   
   Serial.begin(9600);  // start serial port at 9600 bps:
   Serial.println("Please input command:");  //print message on serial monitor
@@ -379,72 +439,84 @@ void loop()
       comdata += char(Serial.read());
       delay(2);
     }
-    Serial.println("comdata: " + comdata);
-    Serial.print("buffSize: ");
-    Serial.println(buffSize);
+    //Serial.println("comdata: " + comdata);
+    logMessage(5,"comdata: " + comdata);
     
-    char jsonTmp[200];
-    comdata.toCharArray(jsonTmp, 200);
+    message = "buffSize: ";
+    message.concat(buffSize);
+    logMessage(5,message);
 
     StaticJsonBuffer<200> jsonBuffer;
-    Serial.print("jsonTmp: ");
-    Serial.println(jsonTmp);
-    JsonObject& root = jsonBuffer.parseObject(jsonTmp);
+    JsonObject& root = jsonBuffer.parseObject(comdata);
 
     if (!root.success()) {
-      Serial.println("parseObject() failed");
+      logMessage(1,"parseObject() failed");
       return;
     }
 
+    //check for log level commands
+
+    if(root["logLvl"].is<int>()) {
+      logLevel = root["logLvl"];
+      
+      message = "Log Level Set To: ";
+      message.concat(logLevel); 
+      logMessage(1,message);
+    }
+
+    //check for group commands
     if(root["group"].is<int>()) {
       comGroup = root["group"];
-      Serial.print("Group: ");
-      Serial.println(comGroup);
+
+      message = "Group: ";
+      message.concat(comGroup); 
+      logMessage(3,message);
 
       if(comGroup >=0 and comGroup <=MAX_GROUP) {
         
         //Program Update
         if(root["program"].is<int>()) {
           comProgram = root["program"];
-          Serial.print("Program: ");
-          Serial.println(comProgram);
+
+          message = "Program: ";
+          message.concat(comProgram); 
+          logMessage(3,message);
 
           if(comProgram >=0 and comProgram <=MAX_PROGRAM) {
             allGroups[comGroup]->setProgram(comProgram);
           }
           else {
-            Serial.println("Invalid Program");
+            logMessage(1,"Invalid Program");
           }
         }
 
         //Speed Update
         if(root["speed"].is<int>()) {
           comSpeed = root["speed"];
-          Serial.print("Speed: ");
-          Serial.println(comSpeed);
+
+          message = "Speed: ";
+          message.concat(comSpeed); 
+          logMessage(3,message);
 
           if(comSpeed >=0 and comSpeed <=MAX_SPEED) {
             allGroups[comGroup]->setSpeed(comSpeed);
           }
           else {
-            Serial.println("Invalid Speed");
+            logMessage(1,"Invalid Speed");
           }
         }
         
       }
       else {
-          Serial.println("Invalid Group");
+          logMessage(1,"Invalid Group");
       }
 
       
     }
-    
-    const char* tmp = root["method"];
-    Serial.print("Command: ");
-    Serial.println(tmp);
-
 
   }
+
+  logMessage(9,"Cycle Start");
   
   group0->groupStep(); //Move LED Group 0 along
   group1->groupStep(); //Move LED Group 1 along

@@ -593,7 +593,7 @@ void setup()
   allGroups[1] = group1;
   allGroups[2] = group2;
 
-
+/*
   zero->setValue(MAX_LED_VALUE);
   one->setValue(MAX_LED_VALUE);
   two->setValue(MAX_LED_VALUE);
@@ -601,7 +601,7 @@ void setup()
 
   
   delay(1000);
-
+*/
   zero->setValue(MIN_LED_VALUE);
   one->setValue(MIN_LED_VALUE);
   two->setValue(MIN_LED_VALUE);
